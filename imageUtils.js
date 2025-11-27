@@ -1,7 +1,3 @@
-
-
-
-
 async function processImage(srcInput, lastWidthHeightRatio = null, isRestore = false, amplitude = null, frequency = null) {
 
   if (lastWidthHeightRatio === true) {
@@ -204,107 +200,110 @@ function invertHue(imageData) {
 
 function warpImage(imageData, isReverse = false, amplitude = null, frequency = null) {
     if (amplitude === null) {
-        amplitude = Math.round(imageData.width * 0.06323396567);
+        amplitude = Math.round(imageData.width * 0.08);
         document.getElementById("amplitudeRange").value = amplitude;
         console.log("Calculated amplitude:", amplitude);
     }
+
     const canvas = document.createElement('canvas');
     canvas.width = imageData.width;
     canvas.height = imageData.height;
     const ctx = canvas.getContext('2d');
-    
-    // Get image data
+
     const pixels = imageData.data;
     const width = imageData.width;
     const height = imageData.height;
-    
-    // Create output image data
-    const outputData = ctx.createImageData(width, height);
-    
-    // Wave parameters
+    const totalBytes = width * height * 4;
+
     if (frequency === null) {
-        frequency = 12.45 / width; // Adjust frequency based on image width
-        console.log("Calculated frequency:", frequency);
+        frequency = 12.45 / width;
         document.getElementById("frequencyRange").value = Math.round(frequency * 1000);
-    }
-    if (isReverse) {
-      amplitude = -amplitude;
-    }
-    const edgeRegion = Math.max(1, height / 3); // First/last 33% of image height
-    
-    // Bilinear interpolation helper
-    function getInterpolatedPixel(x, y) {
-        // Clamp coordinates to image boundaries
-        x = Math.max(0, Math.min(width - 1, x));
-        y = Math.max(0, Math.min(height - 1, y));
-        
-        const x0 = Math.floor(x);
-        const x1 = Math.min(x0 + 1, width - 1);
-        const y0 = Math.floor(y);
-        const y1 = Math.min(y0 + 1, height - 1);
-        
-        const dx = x - x0;
-        const dy = y - y0;
-        
-        const idx00 = (y0 * width + x0) * 4;
-        const idx10 = (y0 * width + x1) * 4;
-        const idx01 = (y1 * width + x0) * 4;
-        const idx11 = (y1 * width + x1) * 4;
-        
-        const result = [];
-        for (let i = 0; i < 4; i++) {
-            const val00 = pixels[idx00 + i];
-            const val10 = pixels[idx10 + i];
-            const val01 = pixels[idx01 + i];
-            const val11 = pixels[idx11 + i];
-            
-            const val0 = val00 * (1 - dx) + val10 * dx;
-            const val1 = val01 * (1 - dx) + val11 * dx;
-            result[i] = val0 * (1 - dy) + val1 * dy;
-        }
-        
-        return result;
-    }
-    
-    function getEdgeAttenuation(y) {
-        const distanceToEdge = Math.min(y, (height - 1) - y);
-        if (distanceToEdge <= 0) {
-            return 0;
-        }
-        const t = Math.max(0, Math.min(1, distanceToEdge / edgeRegion));
-        // Smoothstep for a gradual falloff toward the edges
-        return t * t * (3 - 2 * t);
+        console.log("Calculated frequency:", frequency);
     }
 
-    // Apply wave warp using inverse mapping (pull method)
-    // This ensures no holes and stays within boundaries
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            // Calculate wave offset for this destination pixel
-            const waveOffset = Math.sin(x * frequency) * amplitude;
-            const attenuation = getEdgeAttenuation(y);
-            const adaptiveOffset = waveOffset * attenuation;
-            
-            // Map backward: where should we pull the pixel FROM?
-            // We inverse the wave transform to find source coordinates
-            const srcX = x;
-            let srcY = y - adaptiveOffset;
-            
-            // Clamp to boundaries to ensure we never sample outside
-            srcY = Math.max(0, Math.min(height - 1, srcY));
-            
-            // Get interpolated pixel value from source
-            const pixel = getInterpolatedPixel(srcX, srcY);
-            
-            const destIndex = (y * width + x) * 4;
-            outputData.data[destIndex] = pixel[0];     // R
-            outputData.data[destIndex + 1] = pixel[1]; // G
-            outputData.data[destIndex + 2] = pixel[2]; // B
-            outputData.data[destIndex + 3] = pixel[3]; // A
-        }
+    if (isReverse) {
+        amplitude = -amplitude;
     }
-    
-    // Draw warped image
+
+    const firstPass = isReverse ? "vertical" : "horizontal";
+    const secondPass = isReverse ? "horizontal" : "vertical";
+    const firstBuffer = new Uint8ClampedArray(totalBytes);
+    const secondBuffer = new Uint8ClampedArray(totalBytes);
+
+    const runPass = (sourcePixels, targetPixels, mode) => {
+        const isVerticalPass = mode === "vertical";
+        const attenuationExtent = isVerticalPass ? height : width;
+        const passFrequency = isVerticalPass
+            ? frequency
+            : frequency * (width / Math.max(1, height));
+        const edgeRegion = Math.max(1, attenuationExtent / 3);
+        const tmpPixel = [0, 0, 0, 0];
+
+        const getEdgeAttenuation = (coord) => {
+            const distanceToEdge = Math.min(coord, (attenuationExtent - 1) - coord);
+            if (distanceToEdge <= 0) {
+                return 0;
+            }
+            const t = Math.max(0, Math.min(1, distanceToEdge / edgeRegion));
+            return t * t * (3 - 2 * t);
+        };
+
+        const getInterpolatedPixel = (x, y) => {
+            x = Math.max(0, Math.min(width - 1, x));
+            y = Math.max(0, Math.min(height - 1, y));
+
+            const x0 = Math.floor(x);
+            const x1 = Math.min(x0 + 1, width - 1);
+            const y0 = Math.floor(y);
+            const y1 = Math.min(y0 + 1, height - 1);
+
+            const dx = x - x0;
+            const dy = y - y0;
+
+            const idx00 = (y0 * width + x0) * 4;
+            const idx10 = (y0 * width + x1) * 4;
+            const idx01 = (y1 * width + x0) * 4;
+            const idx11 = (y1 * width + x1) * 4;
+
+            for (let i = 0; i < 4; i++) {
+                const val00 = sourcePixels[idx00 + i];
+                const val10 = sourcePixels[idx10 + i];
+                const val01 = sourcePixels[idx01 + i];
+                const val11 = sourcePixels[idx11 + i];
+
+                const val0 = val00 * (1 - dx) + val10 * dx;
+                const val1 = val01 * (1 - dx) + val11 * dx;
+                tmpPixel[i] = val0 * (1 - dy) + val1 * dy;
+            }
+
+            return tmpPixel;
+        };
+
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const waveInput = isVerticalPass ? x : y;
+                const attenuationCoord = isVerticalPass ? y : x;
+                const waveOffset = Math.sin(waveInput * passFrequency) * amplitude;
+                const adaptiveOffset = waveOffset * getEdgeAttenuation(attenuationCoord);
+
+                const srcX = isVerticalPass ? x : x - adaptiveOffset;
+                const srcY = isVerticalPass ? y - adaptiveOffset : y;
+
+                const pixel = getInterpolatedPixel(srcX, srcY);
+                const destIndex = (y * width + x) * 4;
+                targetPixels[destIndex] = pixel[0];
+                targetPixels[destIndex + 1] = pixel[1];
+                targetPixels[destIndex + 2] = pixel[2];
+                targetPixels[destIndex + 3] = pixel[3];
+            }
+        }
+    };
+
+    runPass(pixels, firstBuffer, firstPass);
+    runPass(firstBuffer, secondBuffer, secondPass);
+
+    const outputData = ctx.createImageData(width, height);
+    outputData.data.set(secondBuffer);
     ctx.putImageData(outputData, 0, 0);
 
     return ctx.getImageData(0, 0, width, height);
