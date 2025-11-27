@@ -206,9 +206,6 @@ function warpImage(imageData, isReverse = false, amplitude = null, frequency = n
     if (amplitude === null) {
         amplitude = Math.round(imageData.width * 0.06323396567);
         document.getElementById("amplitudeRange").value = amplitude;
-        if (isReverse) {
-          amplitude *= -1;
-        }
         console.log("Calculated amplitude:", amplitude);
     }
     const canvas = document.createElement('canvas');
