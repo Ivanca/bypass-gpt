@@ -1,4 +1,3 @@
-
 const startDragAndDrop = ({ dropTarget, onImageDropped, onError }) => {
     if (!dropTarget) {
         throw new Error("startDragAndDrop requires a dropTarget element");
@@ -18,6 +17,43 @@ const startDragAndDrop = ({ dropTarget, onImageDropped, onError }) => {
 
     let dragDepth = 0;
 
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = "image/*";
+    Object.assign(fileInput.style, {
+        opacity: "0",
+        width: "0",
+        height: "0",
+        border: "0",
+        margin: "0",
+        padding: "0",
+        pointerEvents: "none"
+    });
+    dropTarget.appendChild(fileInput);
+
+    const updateFileInputDisplay = () => {
+        fileInput.style.display = dragDepth > 0 ? "none" : "";
+    };
+    updateFileInputDisplay();
+
+    const handleFileSelection = (event) => {
+        const selectedFile = event.target.files?.[0];
+        if (!selectedFile) {
+            safeError("No file selected");
+            return;
+        }
+        if (!selectedFile.type.startsWith("image/")) {
+            safeError("Please choose an image file");
+            return;
+        }
+        onImageDropped(selectedFile);
+    };
+
+    const handleClick = () => {
+        fileInput.value = "";
+        fileInput.click();
+    };
+
     const addHighlight = () => dropTarget.classList.add("drag-over");
     const removeHighlight = () => dropTarget.classList.remove("drag-over");
 
@@ -26,6 +62,7 @@ const startDragAndDrop = ({ dropTarget, onImageDropped, onError }) => {
         event.stopPropagation();
         dragDepth += 1;
         addHighlight();
+        updateFileInputDisplay();
     };
 
     const handleDragOver = (event) => {
@@ -44,6 +81,7 @@ const startDragAndDrop = ({ dropTarget, onImageDropped, onError }) => {
         if (dragDepth === 0) {
             removeHighlight();
         }
+        updateFileInputDisplay();
     };
 
     const handleDrop = (event) => {
@@ -51,6 +89,7 @@ const startDragAndDrop = ({ dropTarget, onImageDropped, onError }) => {
         event.stopPropagation();
         dragDepth = 0;
         removeHighlight();
+        updateFileInputDisplay();
 
         const file = event.dataTransfer?.files?.[0];
         if (!file) {
@@ -74,9 +113,14 @@ const startDragAndDrop = ({ dropTarget, onImageDropped, onError }) => {
     ];
 
     events.forEach(([name, handler]) => dropTarget.addEventListener(name, handler));
+    dropTarget.addEventListener("click", handleClick);
+    fileInput.addEventListener("change", handleFileSelection);
 
     return () => {
         events.forEach(([name, handler]) => dropTarget.removeEventListener(name, handler));
+        dropTarget.removeEventListener("click", handleClick);
+        fileInput.removeEventListener("change", handleFileSelection);
+        fileInput.remove();
     };
 };
 
